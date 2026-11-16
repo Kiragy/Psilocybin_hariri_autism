@@ -1,0 +1,201 @@
+---
+title: "haririr_dyn_drug"
+output: html_document
+date: "2025-04-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# packages & data
+
+```{r}
+library(openxlsx)
+library(tidyverse)
+library(rstatix)
+library(ggrain)
+# install.packages("ggdist")
+library(ggdist)
+library(ggpubr)
+
+psilaut_dem <- read.xlsx("psilaut_dem_outlier.xlsx")  # read participants'  demographic data
+AQ_DACS <- read.csv("PSILAUT_MASTER_Spreadsheet_CE_MD_5DASC.csv") # read participants' scores of AQ and 5D-ACS
+AQ_DACS <- AQ_DACS %>% 
+  rename("PSILAUT_no" = ID)
+psilaut_dem <- psilaut_dem %>% 
+  dplyr::select(- "Sex", -"Group", -"IQ", -"Age", - "AQ") %>% 
+  left_join(AQ_DACS)
+psilaut_dem$Group <- as.factor(psilaut_dem$Group)
+psilaut_dem$Sex <- as.factor(psilaut_dem$Sex)
+psilaut_dem$Dose <- as.factor(psilaut_dem$Dose)
+
+task_regressor <- read.xlsx("task_regressor.xlsx", sheet = "clean")
+ica_ts_harpsi_dem_dose5 <- read.xlsx("ica_ts_harpsi_dem_dose5_6aug.xlsx") # read participants' ICN activity timecourses obtained with dual regression
+ica_ts_harpsi_dem_dose5_con <- ica_ts_harpsi_dem_dose5 %>% 
+  filter(stimuli != "shape_1" & timewindow != "0")
+behavior_hariri <- read.xlsx("summary_behavior_hariri.xlsx")
+
+stimuli_type <- rep(task_regressor$stimuli_type, times = 102)
+ica_ts_harpsi_dem_dose5$stimuli_type <- as.factor(stimuli_type)
+
+```
+
+
+# hariri icn timeseries - import dual regression output 
+```{r}
+data_list <- list()
+for (id in 0:160) {
+  # Extract subject ID from the file name
+  file_name <- paste0("dr_stage1_subject", sprintf("%005d", id), ".txt")
+  # Read the text file and import it as a data frame
+  data <- read.table(file_name, header = FALSE, sep = "")  # You may need to adjust parameters like sep and header based on your data
+  #transpose the data
+  #data <- t(data) 
+  # Set column names
+  colnames(data) <- paste0("ic", 0:24)
+  # Set row names as a sequence of strings
+  row_names <- paste0("t", 1:nrow(data))
+  row.names(data) <- row_names
+  # Insert time_series column as the first column
+  data$time_series <- row_names
+  data$subject_id <- id+1
+  id2 <- id+1
+  subject_key <- sprintf("subject%04d", id2)  # Corrected sprintf usage
+ 
+  data_list[[subject_key]] <- data
+}
+combined_data <- do.call(rbind, data_list)
+subject <- read.xlsx("~/YANGE/Phd/shiftability/PSILAUT/hariri/psilaut_input.xlsx")
+row_subs <- paste0(1:nrow(subject))
+subject$subject_id <- as.numeric(row_subs)
+timeseries_all <- subject%>% 
+  full_join(combined_data)
+timeseries_all <- timeseries_all %>% 
+  select(-"paths")
+write.xlsx(timeseries_all, "/Users/yange/YANGE/Phd/DFC/psilaut/ica_ts_harpsi.xlsx")
+
+timeseries_all_clean <- timeseries_all %>% 
+  select(-"ic10", -"ic13", -"ic14", -"ic16", -"ic17", -"ic15", -c(23:27)) %>% 
+  rename("sub_visit2" = CNS_no)
+psilaut_dem <- psilaut_dem %>% 
+  select(-"rs_meanFD", -"paths")
+timeseries_all_clean <- timeseries_all_clean %>% 
+  full_join(psilaut_dem)
+ica_ts_harpsi_dem <- timeseries_all_clean %>% 
+        separate(col=time_series, into=c("T", "timepoint"), sep=1, remove = FALSE) %>% 
+        select(-"T")
+ica_ts_harpsi_dem$timepoint <- as.numeric(ica_ts_harpsi_dem$timepoint)
+write.xlsx(ica_ts_harpsi_dem, "/Users/yange/YANGE/Phd/DFC/psilaut/ica_ts_harpsi_dem.xlsx")
+```
+
+```{r}
+# Define task timeline
+face_periods <- data.frame(
+  xmin = c(34, 98, 162, 226),  # Starting points of the highlighted periods
+  xmax = c(64, 128, 192, 256), # Ending points of the highlighted periods
+  ymin = rep(-Inf, 2),  # Extend the rectangles to the bottom of the plot
+  ymax = rep(Inf, 2)    # Extend the rectangles to the top of the plot
+)
+
+shapes_periods <- data.frame(
+  xmin = c(2, 66, 130, 194),  # Starting points of the highlighted periods
+  xmax = c(32, 96, 160, 224), # Ending points of the highlighted periods
+  ymin = rep(-Inf, 2),  # Extend the rectangles to the bottom of the plot
+  ymax = rep(Inf, 2)    # Extend the rectangles to the top of the plot
+)
+```
+
+
+
+# k medoid
+```{r}
+library(factoextra)
+library(NbClust)
+library(psych)
+library(cluster)
+library(clusterSim)
+ica_ts_harpsi <- read.xlsx("~/YANGE/Phd/DFC/psilaut/ica_ts_harpsi_dem.xlsx", sheet = "Sheet 1")
+cluster_timepoint_dat <- ica_ts_harpsi %>% 
+  select(- "subject_id", -"timepoint") %>% 
+  pivot_wider(names_from = sub_visit2, values_from = c(2:15))
+
+ica_ts_harpsi_dem_dose5 %>% 
+  group_by(block2) %>% 
+  count(clu7)
+```
+## DB index -dose 5
+```{r}
+library(clusterSim)
+
+index_db_pam <- function(data,  dismtr) {
+  db <- c()
+  for (i in 1:15) {
+    clu <- pam(dismtr, i, diss = TRUE, pamonce = 4, metric = "manhattan", stand = FALSE)  
+    index_db <- index.DB(data, clu$clustering, dismtr, centrotypes = "medoids", p=1, q=2)
+    db[i] <- index_db$DB
+  }
+
+  k <- 1:15
+  db_index <- as.data.frame(cbind(k, db))
+  write.xlsx(db_index, "db_index_psilaut_hariri.xlsx")
+  plot(db_index$k, db_index$db,xlab =  "Cluster number k",
+       ylab = "Davies - Bouldin Index",
+       main = "Davies - Bouldin Plot", cex.main=1,
+       col = "dodgerblue1", cex = 0.9 ,
+       lty=1 , type="o" , lwd=1, pch=4,
+       bty = "l",
+       las = 1, cex.axis = 0.8, tcl  = -0.2)
+}
+
+dismtr <- dist(ica_ts_harpsi_dem_dose5[7:20], method = "manhattan")
+index_db_pam(ica_ts_harpsi_dem_dose5[7:20], dismtr)
+
+```
+
+
+## CH index -dose 5
+```{r}
+dismtr <- dist(ica_ts_harpsi_dem_dose5[7:20], method = "manhattan")
+index_ch_pam <- function(data, dismtr) {
+  db <- c()
+  for (i in 1:15) {
+  clu <- pam(data,i, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE) 
+  index_ch <- index.G1(data, clu$clustering, d=dismtr, centrotypes="medoids" )
+  db[i] <- index_ch}
+
+  ch <- db[1:15]
+  k <- 1:15
+  ch_index <- as.data.frame(cbind(k, ch))
+  write.xlsx(ch_index, "ch_index_psilaut_hariri.xlsx")
+  plot(ch_index$k, ch_index$ch,xlab =  "Cluster number k",
+       ylab = "Calinski-Harabasz Pseudo F-statistic",
+       main = "Calinski-Harabasz Pseudo F-statistic Plot", cex.main=1,
+       col = "dodgerblue1", cex = 0.9 ,
+       lty=1 , type="o" , lwd=1, pch=4,
+       bty = "l",
+       las = 1, cex.axis = 0.8, tcl  = -0.2)
+}
+
+index_ch_pam(ica_ts_harpsi_dem_dose5[7:20], dismtr)
+ch_index <- read.xlsx("ch_index_psilaut_hariri.xlsx")
+
+plot(ch_index$k, ch_index$ch,xlab =  "Cluster number k",
+       ylab = "Calinski-Harabasz Pseudo F-statistic",
+       main = "Calinski-Harabasz Pseudo F-statistic Plot", cex.main=1,
+       col = "dodgerblue1", cex = 0.9 ,
+       lty=1 , type="o" , lwd=1, pch=4,
+       bty = "l",
+       las = 1, cex.axis = 0.8, tcl  = -0.2)
+dev.off()
+```
+
+
+
+```{r}
+clu4 <- pam(ica_ts_harpsi_dem_dose5[7:20],4, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE) 
+ica_ts_harpsi_dem_dose5$clu4 <- clu4$clustering
+medoids <- as.data.frame(clu4$medoids)
+medoids$medoid <- c("M1_4", "M2_4", "M3_4", "M4_4")
+
+```
+                                                                
