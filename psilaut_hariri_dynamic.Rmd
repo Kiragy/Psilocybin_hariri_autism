@@ -1,0 +1,351 @@
+---
+title: "Psilaut_hariri_dose5"
+output: html_document
+date: "2025-08-04"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Packages
+
+```{r}
+library(openxlsx)
+library(tidyverse)
+library(rstatix)
+library(ggrain)
+library(ggpubr)
+library(factoextra)
+library(NbClust)
+library(psych)
+library(cluster)
+```
+
+# Read data
+
+```{r}
+psilaut_dem <- read.xlsx("psilaut_dem_17nov.xlsx") # read participants'  demographic data
+psilaut_dem$Group <- as.factor(psilaut_dem$Group)
+psilaut_dem$Sex <- as.factor(psilaut_dem$Sex)
+psilaut_dem$Dose <- as.factor(psilaut_dem$Dose)
+ica_ts_harpsi_dem_dose5 <- read.xlsx("ica_ts_harpsi_dem_dose5_17nov.xlsx") # read participants' ICN activity timecourses obtained with dual regression
+
+task_regressor <- read.xlsx("task_regressor.xlsx", sheet = "clean") # read HARIRI task stimuli timecourse
+
+beh_pca <- read.xlsx("beh_pca_17nov.xlsx") # read participants' pca scores of behavioural questionnaires
+
+stimuli_type <- rep(task_regressor$stimuli_type, times = 102)
+ica_ts_harpsi_dem_dose5$stimuli_type <- as.character(stimuli_type)
+
+
+```
+
+# K-medoid
+
+```{r}
+clu4 <- pam(ica_ts_harpsi_dem_dose5[3:16],4, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE) 
+ica_ts_harpsi_dem_dose5$clu4 <- clu4$clustering
+```
+
+# FO
+
+```{r}
+# Calculating FO
+# library(stateR)
+ica_ts_harpsi_dem_dose5_con <- ica_ts_harpsi_dem_dose5 %>% 
+  filter(stimuli_type != "0")
+n_cl4_block<- ica_ts_harpsi_dem_dose5_con %>%
+  group_by(sub_visit, stimuli_type) %>% 
+  count(clu4) %>% 
+  rename("cl4_n" = n) 
+n_stimuli_block <- ica_ts_harpsi_dem_dose5_con %>%
+  group_by(sub_visit) %>% 
+  count(stimuli_type) 
+fo_block_cl4_psilaut <- n_cl4_block %>% 
+  full_join(n_stimuli_block) %>% 
+  mutate( "perc" = cl4_n/n) %>% 
+  select(-"cl4_n", -"n") 
+fo_cl4_psilaut_block <- fo_block_cl4_psilaut %>% 
+  pivot_wider(names_from = clu4, names_prefix = "fo_clu", values_from = perc)
+```
+
+# Glm
+
+## 4 clusters
+
+```{r}
+fo_cl4_psilaut_block[3:6][is.na(fo_cl4_psilaut_block[3:6])] <- 0
+fo_cl4_psilaut_block <- fo_cl4_psilaut_block %>%
+  left_join(psilaut_dem)
+fo_cl4_psilaut_block$stimuli_type <- as.factor(fo_cl4_psilaut_block$stimuli_type)
+fo_cl4_psilaut_block$v <- as.factor(fo_cl4_psilaut_block$v)
+
+fo_cl4_psilaut_block <- fo_cl4_psilaut_block %>% 
+  mutate(binary_stimuli = ifelse(stimuli_type == "shape", 0, ifelse(stimuli_type == "face", 1, NA)))
+fo_cl4_psilaut_block$binary_stimuli <- as.factor(fo_cl4_psilaut_block$binary_stimuli)
+
+fo_cl4_psilaut_face <- fo_cl4_psilaut_block %>% 
+  filter(stimuli_type == "face")
+fo_cl4_psilaut_shape <- fo_cl4_psilaut_block %>% 
+  filter(stimuli_type == "shape")
+fo_cl4_psilaut_shape_autistic <- fo_cl4_psilaut_shape %>% 
+  filter(Group == "1")
+fo_cl4_psilaut_shape_nonautis <- fo_cl4_psilaut_shape %>% 
+  filter(Group == "0")
+fo_cl4_psilaut_face_autistic <- fo_cl4_psilaut_face %>% 
+  filter(Group == "1")
+fo_cl4_psilaut_face_nonautis <- fo_cl4_psilaut_face %>% 
+  filter(Group == "0")
+fo_cl4_psilaut_autistic <- fo_cl4_psilaut_block %>% 
+  filter(Group == "1")
+fo_cl4_psilaut_autistic_face <- fo_cl4_psilaut_autistic %>% 
+  filter(stimuli_type == "face")
+fo_cl4_psilaut_autistic_shape <- fo_cl4_psilaut_autistic %>% 
+  filter(stimuli_type == "shape")
+ fo_cl4_psilaut_autistic_plb <-  fo_cl4_psilaut_autistic %>% 
+  filter(Dose == "0")
+ fo_cl4_psilaut_autistic_psl <-  fo_cl4_psilaut_autistic %>% 
+  filter(Dose == "5")
+fo_cl4_psilaut_nonautis  <- fo_cl4_psilaut_block %>% 
+  filter(Group == "0")
+fo_cl4_psilaut_block_plb <- fo_cl4_psilaut_block %>% 
+  filter(Dose == "0")
+fo_cl4_psilaut_block_psl <- fo_cl4_psilaut_block %>% 
+  filter(Dose == "5")
+fo_cl4_psilaut_block_plb_shape <- fo_cl4_psilaut_block_plb %>% 
+  filter(stimuli_type == "shape")
+fo_cl4_psilaut_block_plb_face <- fo_cl4_psilaut_block_plb %>% 
+  filter(stimuli_type == "face")
+fo_cl4_psilaut_block_psl_au <- fo_cl4_psilaut_block_psl %>% 
+  filter(Group == "1")
+fo_cl4_psilaut_block_psl_nonau <- fo_cl4_psilaut_block_psl %>% 
+  filter(Group == "0")
+fo_cl4_psilaut_block_psl_shape <- fo_cl4_psilaut_block_psl %>% 
+  filter(stimuli_type == "shape")
+fo_cl4_psilaut_block_psl_face <- fo_cl4_psilaut_block_psl %>% 
+  filter(stimuli_type == "face")
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block_plb, scale(fo_clu1) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block_plb, scale(fo_clu2) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block_plb, scale(fo_clu3) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block_plb, scale(fo_clu4) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri) + (1|v)))
+
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block, scale(fo_clu1) ~ Dose * binary_stimuli + Group + Sex + scale(Age) + scale(meanFD_hariri) + (1|SUBJECT_ID) + (1|v) ))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape, scale(fo_clu1) ~ Dose + Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_face, scale(fo_clu1) ~ Dose + Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+
+
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block, scale(fo_clu2) ~ Dose * Group * binary_stimuli + Sex + scale(Age) + scale(meanFD_hariri) + (1|SUBJECT_ID) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_autistic, scale(fo_clu2) ~ Dose * binary_stimuli + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_nonautis, scale(fo_clu2) ~ Dose * binary_stimuli + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape, scale(fo_clu2) ~ Dose * Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_face, scale(fo_clu2) ~ Dose * Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape_autistic, scale(fo_clu2) ~ Dose + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape_nonautis, scale(fo_clu2) ~ Dose + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block, scale(fo_clu3) ~ Dose * Group * binary_stimuli + Sex + scale(Age) + scale(meanFD_hariri) + (1|SUBJECT_ID) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_autistic, scale(fo_clu3) ~ Dose * binary_stimuli + Sex + scale(Age) + scale(meanFD_hariri) + (1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_nonautis, scale(fo_clu3) ~ Dose * binary_stimuli + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape, scale(fo_clu3) ~ Dose * Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape_autistic, scale(fo_clu3) ~ Dose + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_shape_nonautis, scale(fo_clu3) ~ Dose + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = fo_cl4_psilaut_face, scale(fo_clu3) ~ Dose * Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+
+summary(lmerTest::lmer(data = fo_cl4_psilaut_block, scale(fo_clu4) ~ Dose * binary_stimuli * Group + Sex + scale(Age) + scale(meanFD_hariri) + (1|SUBJECT_ID) + (1|v)))
+
+```
+
+#DT
+
+```{r}
+vars=c('sub_visit')
+foVar='clu4'
+sortBy=c('timepoint')
+
+dwellCount <- function(x){
+
+  f <- c(which(diff(x) != 0),length(x))
+
+  y2 <- c(f[1],diff(f))
+  y1 <- x[f]
+
+  y <- list("cluster" = y1,
+            "dwell" = y2)
+
+  return(y)
+}
+
+vars_ <- dplyr::syms(vars)
+  vars__ <- dplyr::syms(append(vars, 'cluster'))
+  srt_ <- dplyr::syms(sortBy)
+
+nest_dwell <- function(tbl, vars, foVar, sortBy){
+
+  require(dplyr)
+  require(tidyr)
+  require(janitor)
+
+  vars_ <- dplyr::syms(vars)
+  vars__ <- dplyr::syms(append(vars, 'cluster'))
+  srt_ <- dplyr::syms(sortBy)
+
+  tbl %>%
+    dplyr::rename('clus' = all_of(foVar)) %>%
+    dplyr::group_by(!!!vars_) %>%
+    dplyr::arrange(!!!srt_) %>%
+    dplyr::summarise(clus = list(clus)) %>%
+    dplyr::mutate(cluster = purrr::map(clus, dwellCount)) %>%
+    tidyr::unnest_wider(cluster) %>%
+    dplyr::select(-clus) %>%
+    tidyr::unnest(c(cluster, dwell)) %>%
+    dplyr::ungroup() %>%
+    # dplyr::filter(dwell != 1) %>%
+    dplyr::group_by(!!!vars__) %>%
+    dplyr::summarise(mean_dwell = mean(dwell)) %>%
+    dplyr::mutate(cluster = as.character(cluster)) %>%
+    dplyr::group_by(cluster) %>%
+    tidyr::nest()
+
+}
+
+dwt_psihar_cl4_block <-unnest(nest_dwell(ica_ts_harpsi_dem_dose5_con, vars=c('sub_visit', 'stimuli_type'), foVar='clu4', sortBy=c('timepoint')), cols = c(data))
+dt_cl4_psilaut_block <- dwt_psihar_cl4_block %>% 
+  pivot_wider(names_from = cluster, names_prefix = "dt_clu", values_from = mean_dwell)
+
+```
+
+```{r}
+dt_cl4_psilaut_block[3:6][is.na(dt_cl4_psilaut_block[3:6])] <- 0
+dt_cl4_psilaut_block <- dt_cl4_psilaut_block %>%
+  left_join(psilaut_dem)
+dt_cl4_psilaut_block$stimuli_type <- as.factor(dt_cl4_psilaut_block$stimuli_type)
+dt_cl4_psilaut_block <- dt_cl4_psilaut_block %>% 
+  mutate(binary_stimuli = ifelse(stimuli_type == "shape", 0, ifelse(stimuli_type == "face", 1, NA)))
+dt_cl4_psilaut_block$binary_stimuli <- as.factor(dt_cl4_psilaut_block$binary_stimuli)
+
+
+dt_cl4_psilaut_face <- dt_cl4_psilaut_block %>% 
+  filter(stimuli_type == "face")
+dt_cl4_psilaut_shape <- dt_cl4_psilaut_block %>% 
+  filter(stimuli_type == "shape")
+dt_cl4_psilaut_autistic <- dt_cl4_psilaut_block %>% 
+  filter(Group == "1")
+dt_cl4_psilaut_nonautis <- dt_cl4_psilaut_block %>% 
+  filter(Group == "0")
+dt_cl4_psilaut_shape_autistic <- dt_cl4_psilaut_shape %>% 
+  filter(Group == "1")
+dt_cl4_psilaut_shape_nonautis <- dt_cl4_psilaut_shape %>% 
+  filter(Group == "0")
+dt_cl4_psilaut_block_plb <- dt_cl4_psilaut_block %>% 
+  filter(Dose == "0")
+
+summary(lm(data = dt_cl4_psilaut_block_plb, scale(dt_clu1) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri)))
+summary(lm(data = dt_cl4_psilaut_block_plb, scale(dt_clu2) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri)))
+summary(lm(data = dt_cl4_psilaut_block_plb, scale(dt_clu3) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri)))
+summary(lm(data = dt_cl4_psilaut_block_plb, scale(dt_clu4) ~ binary_stimuli + Group + scale(Age) + Sex + scale(meanFD_hariri)))
+
+
+summary(lmerTest::lmer(data = dt_cl4_psilaut_block, scale(dt_clu1) ~ Dose * binary_stimuli * Group + Group + Sex + scale(Age) + scale(meanFD_hariri) + (1|SUBJECT_ID) + (1|v)))
+
+summary(lmerTest::lmer(data = dt_cl4_psilaut_block, scale(dt_clu2) ~ Dose * binary_stimuli * Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID)))
+
+summary(lmerTest::lmer(data = dt_cl4_psilaut_face, scale(dt_clu2) ~ Dose + Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = dt_cl4_psilaut_shape, scale(dt_clu2) ~ Dose * Group + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = dt_cl4_psilaut_shape_autistic, scale(dt_clu2) ~ Dose + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+summary(lmerTest::lmer(data = dt_cl4_psilaut_shape_nonautis, scale(dt_clu2) ~ Dose + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+
+
+summary(lmerTest::lmer(data = dt_cl4_psilaut_block, scale(dt_clu3) ~ Dose * Group * binary_stimuli  + Sex + scale(Age) + scale(meanFD_hariri) +(1|SUBJECT_ID) + (1|v)))
+
+
+summary(lmerTest::lmer(data = dt_cl4_psilaut_block, scale(dt_clu4) ~  binary_stimuli * Dose * Group + Sex + scale(Age) + scale(meanFD_hariri)  + (1|SUBJECT_ID) + (1|v)))
+
+```
+
+#Shifts in FO/DT ~ beh_pca ##FO
+
+```{r}
+fo_cl4_psilaut_block <- psilaut_dem %>% 
+  dplyr::select(sub_visit, Dose, meanFD_hariri, SUBJECT_ID,Age, Sex, Group) %>% 
+  right_join(fo_cl4_psilaut_block)
+
+fo_cl4_psilaut_block[9:12][is.na(fo_cl4_psilaut_block[9:12])] <- 0
+fo_cl4_psilaut_block_wide <- fo_cl4_psilaut_block %>% 
+  dplyr::select(-"sub_visit") %>% 
+  pivot_wider(names_from = stimuli_type, values_from = c(8:11, meanFD_hariri))
+
+fo_cl4_psilaut_block_wide <- psilaut_dem %>% 
+  dplyr::select(Dose, SUBJECT_ID) %>% 
+  right_join(fo_cl4_psilaut_block_wide)
+fo_cl4_psilaut_block_wide <- fo_cl4_psilaut_block_wide %>% 
+  pivot_wider(names_from = Dose, values_from = c(6:13, meanFD_hariri_face, meanFD_hariri_shape))
+
+```
+
+```{r}
+fo_cl4_psilaut_block_wide <- beh_pca %>% 
+  right_join(fo_cl4_psilaut_block_wide)
+fo_cl4_psilaut_block_wide <- fo_cl4_psilaut_block_wide %>% 
+  drop_na(c(10:25))
+fo_cl4_psilaut_block_wide <- fo_cl4_psilaut_block_wide %>% 
+  mutate(fo_clu3_diff = fo_clu3_shape_5 - fo_clu3_shape_0) %>% 
+  mutate(fo_clu2_diff = fo_clu2_shape_5 - fo_clu2_shape_0) %>% 
+  mutate(fo_clu1_diff = fo_clu1_shape_5 - fo_clu1_shape_0) %>% 
+  mutate(fo_clu4_diff = fo_clu4_shape_5 - fo_clu4_shape_0) 
+
+fo_cl4_psilaut_block_wide_au <- fo_cl4_psilaut_block_wide %>% 
+  filter(Group == "1")
+
+summary(lm(data = fo_cl4_psilaut_block_wide, scale(fo_clu3_diff) ~ scale(Comp.1)  + scale(Age) + Sex + scale(meanFD_hariri_face_5) + scale(meanFD_hariri_face_0)))
+confint(lm(data = fo_cl4_psilaut_block_wide, scale(fo_clu3_diff) ~ scale(Comp.1)  + scale(Age) + Sex + scale(meanFD_hariri_face_5) + scale(meanFD_hariri_face_0)), level = 0.95)
+
+fo_cl4_psilaut_block_wide$RES_fo_clu3_diff <- resid(lm(data = fo_cl4_psilaut_block_wide, scale(fo_clu3_diff) ~ scale(Age) + Sex + scale(meanFD_hariri_face_5) + scale(meanFD_hariri_face_0)))
+
+summary(lm(data = fo_cl4_psilaut_block_wide, scale(fo_clu2_diff) ~  scale(Comp.1)+ scale(Age) + Sex + scale(meanFD_hariri_face_0) + scale(meanFD_hariri_face_5) ))
+confint(lm(data = fo_cl4_psilaut_block_wide, scale(fo_clu2_diff) ~ scale(Comp.1)  + scale(Age) + Sex + scale(meanFD_hariri_face_5) + scale(meanFD_hariri_face_0)), level = 0.95)
+
+fo_cl4_psilaut_block_wide$RES_fo_clu2_diff <- resid(lm(data = fo_cl4_psilaut_block_wide, scale(fo_clu2_diff) ~ scale(Age) + Sex + scale(meanFD_hariri_face_5) + scale(meanFD_hariri_face_0)))
+```
+
+##DT
+
+```{r}
+dt_cl4_psilaut_block <- psilaut_dem %>% 
+  dplyr::select(sub_visit, Dose, meanFD_hariri, SUBJECT_ID,  Age, Sex, Group) %>% 
+  right_join(dt_cl4_psilaut_block)
+dt_cl4_psilaut_block[9:12][is.na(dt_cl4_psilaut_block[9:12])] <- 0
+dt_cl4_psilaut_block_wide <- dt_cl4_psilaut_block %>% 
+  dplyr::select(-"sub_visit") %>% 
+  pivot_wider(names_from = stimuli_type, values_from = c(8:11, meanFD_hariri))
+dt_cl4_psilaut_block_wide <- psilaut_dem %>% 
+  dplyr::select(Dose, SUBJECT_ID) %>% 
+  right_join(dt_cl4_psilaut_block_wide)
+dt_cl4_psilaut_block_wide <- dt_cl4_psilaut_block_wide %>% 
+  pivot_wider(names_from = Dose, values_from = c(6:13, meanFD_hariri_face, meanFD_hariri_shape))
+dt_cl4_psilaut_block_wide <- dt_cl4_psilaut_block_wide %>% 
+  drop_na(c(5:20))
+
+dt_cl4_psilaut_block_wide <- dt_cl4_psilaut_block_wide %>% 
+  mutate(dt_clu3_diff = dt_clu3_shape_5 - dt_clu3_shape_0) %>% 
+  mutate(dt_clu2_diff = dt_clu2_shape_5 - dt_clu2_shape_0) %>% 
+  mutate(dt_clu1_diff = dt_clu1_shape_5 - dt_clu1_shape_0) %>% 
+  mutate(dt_clu4_diff = dt_clu4_shape_5 - dt_clu4_shape_0)
+
+dt_cl4_psilaut_block_wide <- beh_pca %>% 
+  right_join(dt_cl4_psilaut_block_wide)
+
+summary(lm(data = dt_cl4_psilaut_block_wide, scale(dt_clu2_diff) ~ scale(Comp.1) + scale(Age) + Sex + scale(meanFD_hariri_face_0) + scale(meanFD_hariri_face_5) ))
+
+
+```

@@ -1,0 +1,149 @@
+---
+title: "psilaut"
+output: html_document
+date: "2024-12-06"
+---
+```{r}
+library(openxlsx)
+library(tidyverse)
+library(rstatix)
+library(ggrain)
+```
+
+```{r}
+core_netstr_hariripsi_dose5_dem <- read.xlsx("core_netstr_hariripsi_dose5_dem_17nov.xlsx") # read participants' core network strength
+
+psilaut_dem <- read.xlsx("psilaut_dem_17nov.xlsx") # read participants'  demographic data
+psilaut_dem$Group <- as.factor(psilaut_dem$Group)
+psilaut_dem$Sex <- as.factor(psilaut_dem$Sex)
+psilaut_dem$Dose <- as.factor(psilaut_dem$Dose)
+
+core_netstr_hariripsi_dose5_dem$Dose <- as.factor(core_netstr_hariripsi_dose5_dem$Dose)  
+core_netstr_hariripsi_dose5_dem$Sex <- as.factor(core_netstr_hariripsi_dose5_dem$Sex)  
+core_netstr_hariripsi_dose5_dem$Group <- as.factor(core_netstr_hariripsi_dose5_dem$Group)  
+core_netstr_hariripsi_dose5_dem$v <- as.factor(core_netstr_hariripsi_dose5_dem$v)  
+core_netstr_hariripsi_dose5_dem <- psilaut_dem %>% 
+  right_join(core_netstr_hariripsi_dose5_dem)
+
+beh_pca <- read.xlsx("beh_pca_17nov.xlsx") # read participants' pca scores of behavioural questionnaires
+```
+## demographic data
+```{r}
+library(rstatix)
+core_netstr_hariripsi_dose5_dem %>% 
+  group_by(Dose, Group) %>% 
+  get_summary_stats(Age, type = "mean_sd") 
+
+core_netstr_hariripsi_dose5_dem %>% 
+  filter(Dose == 0) %>%
+  t_test(Age ~ Group)
+core_netstr_hariripsi_dose5_dem %>% 
+  group_by(Group, Dose) %>% 
+  count(Sex) 
+core_netstr_hariripsi_dose5_dem %>% 
+  filter(Dose == "0") %>% 
+  count(Group)
+core_netstr_hariripsi_dose5_dem %>% 
+  filter(Dose == "5") %>% 
+  group_by(Group) %>% 
+  get_summary_stats(Age, type = "mean_sd") 
+```
+
+### lm -baseline differences in core network strength
+```{r}
+core_netstr_hariripsi_plb_dem <- core_netstr_hariripsi_dose5_dem %>% 
+  filter(Dose == "0")
+core_netstr_hariripsi_plb_dem <- beh_pca %>% 
+    right_join(core_netstr_hariripsi_plb_dem)
+```
+
+
+```{r}
+summary(lmerTest::lmer(scale(ic0) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+summary(lmerTest::lmer(scale(ic1) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+summary(lmerTest::lmer(scale(ic2) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+summary(lmerTest::lmer(scale(ic3) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+summary(lmerTest::lmer(scale(ic4) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+
+summary(lmerTest::lmer(scale(ic5) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+core_netstr_hariripsi_plb_dem$Res_ic5 <- resid(lm(scale(ic5) ~ Sex + scale(Age) + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lmerTest::lmer(scale(ic5) ~ scale(Comp.1) + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+
+
+
+summary(lmerTest::lmer(scale(ic6) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+core_netstr_hariripsi_plb_dem$Res_ic6 <- resid(lm(scale(ic6) ~ Sex + scale(Age) + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lmerTest::lmer(scale(ic6) ~ scale(Comp.1) + Sex + scale(Age) + scale(meanFD_hariri) + (1|v), data = core_netstr_hariripsi_plb_dem))
+
+
+summary(lm(scale(ic7) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lm(scale(ic8) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lm(scale(ic9) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lm(scale(ic11) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lm(scale(ic12) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lm(scale(ic18) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+summary(lm(scale(ic19) ~ Group + Sex + scale(Age)  + scale(meanFD_hariri), data = core_netstr_hariripsi_plb_dem))
+p <- c(0.5147, 0.885, 0.394, 0.4819, 0.251, 0.007197, 0.00496, 0.5134, 0.931, 0.3901, 0.995, 0.0385, 0.57468, 0.413)
+p.adjust(p, method = "fdr" )
+```
+
+
+# drug effects
+### GLM -drug effects
+```{r}
+core_netstr_hariripsi_dose5_dem$Dose <- as.factor(core_netstr_hariripsi_dose5_dem$Dose)
+core_netstr_hariripsi_dose5_dem$Sex <- as.factor(core_netstr_hariripsi_dose5_dem$Sex)
+core_netstr_hariripsi_dose5_dem$Group <- as.factor(core_netstr_hariripsi_dose5_dem$Group)
+
+summary(lmerTest::lmer(scale(ic0) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|SUBJECT_ID) + (1|v), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic1) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age)  + (1|SUBJECT_ID) + (1|v), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic2) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic3) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic4) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic5) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age)  + (1|SUBJECT_ID) + (1|v), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic6) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID) , data = core_netstr_hariripsi_dose5_dem))
+lmer_ic6_dose5 <- lmerTest::lmer(scale(ic6) ~ Group *  Dose + Sex + scale(meanFD_hariri) + scale(Age)  + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem)
+emmeans::emmeans(lmer_ic6_dose5, list(pairwise ~ Dose | Group))
+core_netstr_hariripsi_dose5_non <- core_netstr_hariripsi_dose5_dem %>% 
+  filter(Group == 0)
+core_netstr_hariripsi_dose5_au <- core_netstr_hariripsi_dose5_dem %>% 
+  filter(Group == 1)
+summary(lmerTest::lmer(scale(ic6) ~ Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v)  + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_non))
+summary(lmerTest::lmer(scale(ic6) ~ Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v)  + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_au))
+
+summary(lmerTest::lmer(scale(ic7) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v)+ (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic8) ~ Group + Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic9) ~ Group + Dose + Sex + scale(meanFD_hariri) + scale(Age)  + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic11) ~ Group + Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic12) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic18) ~ Group + Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+
+summary(lmerTest::lmer(scale(ic19) ~ Group * Dose + Sex + scale(meanFD_hariri) + scale(Age) + (1|v) + (1|SUBJECT_ID), data = core_netstr_hariripsi_dose5_dem))
+```
+
+### shifts in core network strength
+```{r}
+core_netstr_hariripsi_dose5_shifts <- core_netstr_hariripsi_dose5_dem %>% 
+  select(SUBJECT_ID, meanFD_hariri, ic6, Dose, Group, Sex, Age) %>% 
+  pivot_wider(values_from = c(ic6, meanFD_hariri), names_from = Dose) %>% 
+  mutate("ic6_shift" = ic6_5 - ic6_0)
+core_netstr_hariripsi_dose5_shifts <- core_netstr_hariripsi_dose5_shifts %>% 
+  drop_na(c(5:6))
+core_netstr_hariripsi_dose5_shifts <- beh_pca %>% 
+    right_join(core_netstr_hariripsi_dose5_shifts)
+
+summary(lm(data = core_netstr_hariripsi_dose5_shifts, scale(ic6_shift) ~ scale(Comp.1) + Sex + scale(Age) + scale(meanFD_hariri_5) + scale(meanFD_hariri_0)))
+
+```
+

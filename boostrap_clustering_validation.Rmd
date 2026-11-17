@@ -1,0 +1,303 @@
+---
+title: "boostrap_clustering_validation"
+output: html_document
+date: "2026-08-11"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Load packages
+```{r}
+library(tidyverse)
+library(purrr)
+library(cluster)
+library(openxlsx)
+
+```
+
+# read data
+```{r}
+ica_ts_harpsi_dem_dose5 <- read.xlsx("ica_ts_harpsi_dem_dose5_17nov.xlsx")
+clu4 <- pam(ica_ts_harpsi_dem_dose5[3:16],4, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE) 
+ica_ts_harpsi_dem_dose5$clu4 <- clu4$clustering
+medoids_clu4 <- as.data.frame(clu4$medoids) # medoids of full dataset
+```
+
+# Stratified Sampling and Overall Clustering
+```{r}
+# Loop 1: Generate N bootstrap samples
+n_bootstraps <- 1000
+
+set.seed(123)
+boot_samples <- map(1:n_bootstraps, function(i) {
+  ica_ts_harpsi_dem_dose5 %>%
+    group_by(Group, Dose) %>%  # Replace with your actual group variables
+    select(starts_with("ic")) %>% 
+    slice_sample(prop = 0.8, replace = FALSE) %>%
+    ungroup()
+})
+library(future) # Provides the plan() function
+library(furrr)
+library(progressr)
+# Set up multi-core parallel processing
+# plan(multisession, workers = parallel::detectCores() - 1)
+
+# Loop 2: Parallelized PAM execution
+k_value <- 4
+
+# 2. CHOOSE HOW MANY SAMPLES TO CLUSTER
+n_samples_to_run <- 50  # Change this to any number (e.g., 10, 100, length(boot_samples))
+samples_subset <- boot_samples[1:n_samples_to_run]
+
+```
+
+```{r run-clustering, include=FALSE}
+plan(sequential)
+# Setup temp log file
+log_file <- file.path("HARIRI", "pam_progress.log")
+if (file.exists(log_file)) file.remove(log_file)
+# Loop 2: Parallelized PAM execution
+k_value <- 4
+
+# 2. CHOOSE HOW MANY SAMPLES TO CLUSTER
+n_samples_to_run <- 1000  # Change this to any number (e.g., 10, 100, length(boot_samples))
+samples_subset <- boot_samples[1:n_samples_to_run]
+# plan(multisession, workers = parallel::detectCores() - 1)
+
+boot_results <- future_map2(
+  samples_subset,
+  seq_along(samples_subset),
+  function(boot_sample, sample_id) {
+    
+    # Log START event
+    cat(sprintf("[%s] STARTED  Sample #%d\n", Sys.time(), sample_id), 
+        file = log_file, append = TRUE)
+    
+    feature_mat <- boot_sample %>% select(starts_with("ic"))
+    
+    fit <- pam(
+      feature_mat, 
+      k = k_value, 
+      diss = FALSE, 
+      metric = "manhattan", 
+      stand = FALSE, 
+      pamonce = 4
+    )
+    
+    # Log FINISH event
+    cat(sprintf("[%s] FINISHED Sample #%d\n", Sys.time(), sample_id), 
+        file = log_file, append = TRUE)
+    
+    list(
+      sample_id = sample_id,
+      medoids   = fit$medoids,
+      sil_width = fit$silinfo$avg.width
+    )
+  },
+  .options = furrr_options(seed = TRUE, packages = c("dplyr", "cluster"))
+)
+
+plan(sequential)
+```
+
+```{r print-log, echo=FALSE, comment=""}
+# Print the log output cleanly inside your rendered document
+cat(readLines(log_file), sep = "\n")
+```
+# Extract & Save Results to Disk
+```{r}
+library(dplyr)
+library(purrr)
+library(readr)
+
+# 1. Tidy all bootstrap medoids into a single long data frame
+boot_medoids_df <- map_dfr(boot_results, function(res) {
+  as.data.frame(res$medoids) %>%
+    mutate(
+      sample_id = res$sample_id,
+      boot_cluster_id = row_number(),
+      avg_sil_width = res$sil_width
+    ) %>%
+    relocate(sample_id, boot_cluster_id, avg_sil_width)
+})
+
+# 2. Save the dataframe to a CSV file on your laptop
+output_dir <- "medoid_stability_results_80"
+if (!dir.exists(output_dir)) dir.create(output_dir)
+
+write_csv(boot_medoids_df, file.path(output_dir, "bootstrap_medoids_80_1000.csv"))
+cat("Saved bootstrap medoids to:", file.path(output_dir, "bootstrap_medoids_80.csv"), "\n")
+```
+
+# Match Bootstrap Medoids to Benchmark Medoids
+
+```{r}
+matched_results_2 <- boot_medoids_df %>%
+  group_by(sample_id) %>%
+  group_split() %>%
+  map_dfr(function(sample_df) {
+  
+  # Extract feature matrices (K x D)
+  current_medoids <- sample_df %>%
+    select(starts_with("ic")) %>%
+    as.matrix()
+  
+  gold_medoids <- as.matrix(medoids_clu4)
+  
+  # Rows = full-dataset medoids; columns = bootstrap medoids
+  cor_matrix <- cor(
+    t(gold_medoids),
+    t(current_medoids),
+    method = "pearson"
+  )
+  
+  # Greedy matching: highest correlation first
+  remaining_cor <- cor_matrix
+  n_matches <- min(nrow(remaining_cor), ncol(remaining_cor))
+  
+  alignment_map <- vector("list", n_matches)
+  
+  for (i in seq_len(n_matches)) {
+    
+    # Find the highest remaining correlation
+    best_match <- which(
+      remaining_cor == max(remaining_cor, na.rm = TRUE),
+      arr.ind = TRUE
+    )[1, ]
+    
+    gold_id <- best_match["row"]
+    boot_id <- best_match["col"]
+    
+    alignment_map[[i]] <- tibble(
+      boot_cluster_id = boot_id,
+      matched_full_dataset_medoid_id = gold_id,
+      correlation = cor_matrix[gold_id, boot_id],
+      matching_order = i
+    )
+    
+    # Prevent either medoid from being matched again
+    remaining_cor[gold_id, ] <- NA_real_
+    remaining_cor[, boot_id] <- NA_real_
+  }
+  
+  alignment_map <- bind_rows(alignment_map)
+  
+  # Map the assignments back to the bootstrap rows
+  sample_df %>%
+    mutate(boot_cluster_id = row_number()) %>%
+    left_join(alignment_map, by = "boot_cluster_id") %>%
+    arrange(matched_full_dataset_medoid_id)
+})
+
+write_csv(matched_results_2, file.path(output_dir, "matched_bootstrap_medoids_2.csv"))
+```
+
+# Per-Medoid Correlation Distribution
+```{r}
+library(ggplot2)
+
+# Compute correlation across features per matched pair
+correlation_df_2 <- matched_results_2 %>%
+  rowwise() %>%
+  mutate(
+    # Get feature vector of matched gold standard
+    gold_vector = list(as.numeric(medoids_clu4[matched_full_dataset_medoid_id, ])),
+    boot_vector = list(c_across(starts_with("ic"))),
+    
+    # Compute correlation
+    pearson_r = cor(boot_vector, gold_vector, method = "pearson")
+  ) %>%
+  ungroup()
+
+# Plot the distribution density curves per Benchmark Medoid
+ggplot(correlation_df_2, aes(x = pearson_r, fill = factor(matched_full_dataset_medoid_id))) +
+  geom_density(alpha = 0.5) +
+  scale_x_continuous(limits = c(-1, 1)) +
+  labs(
+    # title = "Bootstrap Stability: Correlation to Gold Standard Medoids",
+    x = "Pearson Correlation (r)",
+    y = "Density",
+    fill = "Gold Medoid ID"
+  ) +
+  theme_minimal(base_size = 12) +
+  theme(legend.position = "bottom")
+
+
+```
+# Per-Medoid Correlation Distribution
+```{r}
+library(ggplot2)
+
+# Compute correlation across features per matched pair
+correlation_df_2<- matched_results_2 %>%
+  rowwise() %>%
+  mutate(
+    # Get feature vector of matched gold standard
+    gold_vector = list(as.numeric(medoids_clu4[matched_full_dataset_medoid_id, ])),
+    boot_vector = list(c_across(starts_with("ic"))),
+    
+    # Compute correlation
+    pearson_r = cor(boot_vector, gold_vector, method = "pearson")
+  ) %>%
+  ungroup()
+correlation_df_2$Group <- factor(
+  correlation_df_2$matched_full_dataset_medoid_id,
+  levels = c(1, 2, 3, 4)
+)
+
+ggplot(
+  correlation_df_2,
+  aes(
+    x = pearson_r,
+    fill = factor(matched_full_dataset_medoid_id)
+  )
+) +
+  geom_histogram(
+    binwidth = 0.02,
+    boundary = -1,
+    position = "identity"
+  ) +
+  coord_cartesian(xlim = c(0, 1)) +
+  scale_fill_manual(
+    values = c(
+      "1" = "#0072B2",
+      "2" = "#D55E00",
+      "3" = "#009E73",
+      "4" = "#CC79A7"
+    ),
+    name = "Medoid"
+  ) +
+  facet_wrap(~ Group, ncol = 1, scales = "free_y") +
+  guides(fill = guide_legend(ncol = 1)) +
+  labs(
+    x = "Pearson correlation (r)",
+    y = "Count"
+  ) +
+  #theme_minimal(base_size = fangzheng12MultiLine) +
+  theme(legend.position = "right") +
+  theme_minimal(base_size = 12) +
+  theme(
+  panel.grid.minor = element_blank(),
+  strip.text = element_blank(),
+  strip.background = element_blank()
+)+
+  theme(
+   plot.margin = unit(c(0.5,0.5,0.5,0.5),"cm"),
+   panel.background = element_blank(), # panel.background = element_rect(fill = alpha("#007200", 0.2), color = NA),  # area behind the data
+   axis.line = element_line(color = "black"),
+   axis.title = element_text(size = 12, color = "black",
+                             face = "bold"),
+   axis.text= element_text(size = 10, color = "black"),
+   axis.text.x = element_text(margin = margin(t = 10, b = 3)),
+   axis.text.y = element_text(size = 10, margin = margin(r = 10, l = 3)),
+   legend.position.inside =c(0.95,0.95),
+   legend.title = element_text(size = 9, color = "black",
+                             face = "bold"),
+   legend.text = element_text(size = 10),
+   legend.margin = margin(t=5, l=5,r=5,b=5)
+ )
+
+
+```

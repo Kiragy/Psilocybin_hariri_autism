@@ -1,0 +1,95 @@
+---
+title: "haririr_dyn_drug"
+output: html_document
+date: "2025-04-14"
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# packages
+
+```{r}
+library(openxlsx)
+library(tidyverse)
+library(rstatix)
+library(ggrain)
+# install.packages("ggdist")
+# library(ggdist)
+library(ggpubr)
+```
+
+# k medoid
+```{r}
+library(factoextra)
+# library(NbClust)
+library(psych)
+library(cluster)
+library(clusterSim)
+ica_ts_harpsi_dem_dose5 <- read.xlsx("ica_ts_harpsi_dem_dose5_17nov.xlsx") # read participants' ICN activity timecourses obtained with dual regression
+
+```
+## DB index -dose 5
+```{r}
+index_db_pam <- function(data,  dismtr) {
+  db <- c()
+  for (i in 2:15) {
+    clu <- pam(data,i, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE)  
+    index_db <- index.DB(data, clu$clustering, dismtr, centrotypes = "medoids", p=1, q=2)
+    db[i] <- index_db$DB
+  }
+
+  k <- 2:15
+  db_index <- as.data.frame(cbind(k, db))
+  write.xlsx(db_index, "db_index_psilaut_hariri.xlsx")
+  plot(db_index$k, db_index$db,xlab =  "Cluster number k",
+       ylab = "Davies - Bouldin Index",
+       main = "Davies - Bouldin Plot", cex.main=1,
+       col = "dodgerblue1", cex = 0.9 ,
+       lty=1 , type="o" , lwd=1, pch=4,
+       bty = "l",
+       las = 1, cex.axis = 0.8, tcl  = -0.2)
+}
+
+dismtr <- dist(ica_ts_harpsi_dem_dose5[5:18], method = "manhattan")
+index_db_pam(ica_ts_harpsi_dem_dose5[5:18], dismtr)
+
+```
+
+
+## CH index -dose 5
+```{r}
+dismtr <- dist(ica_ts_harpsi_dem_dose5[3:16], method = "manhattan")
+index_ch_pam <- function(data, dismtr) {
+  db <- c()
+  for (i in 2:15) {
+  clu <- pam(data,i, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE) 
+  index_ch <- index.G1(data, clu$clustering, d=dismtr, centrotypes="medoids" )
+  db[i] <- index_ch}
+
+  ch <- db[2:15]
+  k <- 2:15
+  ch_index <- as.data.frame(cbind(k, ch))
+  write.xlsx(ch_index, "ch_index_psilaut_hariri.xlsx")
+  plot(ch_index$k, ch_index$ch,xlab =  "Cluster number k",
+       ylab = "Calinski-Harabasz Pseudo F-statistic",
+       main = "Calinski-Harabasz Pseudo F-statistic Plot", cex.main=1,
+       col = "dodgerblue1", cex = 0.9 ,
+       lty=1 , type="o" , lwd=1, pch=4,
+       bty = "l",
+       las = 1, cex.axis = 0.8, tcl  = -0.2)
+}
+
+index_ch_pam(ica_ts_harpsi_dem_dose5[3:16], dismtr)
+```
+
+
+
+```{r}
+clu4 <- pam(ica_ts_harpsi_dem_dose5[3:16],4, diss = FALSE, pamonce = 4, metric = "manhattan", stand = FALSE) 
+ica_ts_harpsi_dem_dose5$clu4 <- clu4$clustering
+medoids <- as.data.frame(clu4$medoids)
+medoids$medoid <- c("M1_4", "M2_4", "M3_4", "M4_4")
+
+```
+                                                                
